@@ -6,31 +6,152 @@
   <title>Live Pins</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
   <style>
-    html, body, #map { height: 100%; margin: 0; }
+    html, body, #map { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    #panel {
+      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
+      background: #fff; padding: 12px; box-shadow: 0 -2px 10px rgba(0,0,0,.25);
+      display: grid; gap: 8px; max-width: 500px; margin: 0 auto;
+      border-radius: 12px 12px 0 0;
+    }
+    #panel input, #panel select, #panel textarea, #panel button {
+      font-size: 16px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box; width: 100%;
+    }
+    #panel button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
+    #searchRow { display: flex; gap: 6px; }
+    #searchRow button { width: auto; }
+    #hint { font-size: 14px; color: #555; margin: 0; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script>
-    // Create the map, centered on Mauritius
-    const map = L.map('map').setView([-20.25, 57.55], 10);
+  <div id="panel">
+    <div id="searchRow">
+      <input id="search" placeholder="Search an address or tap the map">
+      <button id="searchBtn">Go</button>
+    </div>
+    <p id="hint">Tap the map or search to choose a location.</p>
+    <select id="type">
+      <option value="event">Event</option>
+      <option value="quest">Side Quest</option>
+    </select>
+    <input id="title" placeholder="Title" maxlength="80">
+    <textarea id="desc" placeholder="Description (optional)" rows="2" maxlength="300"></textarea>
+    <select id="hours">
+      <option value="3">Expires in 3 hours</option>
+      <option value="24" selected>Expires in 24 hours</option>
+      <option value="72">Expires in 3 days</option>
+      <option value="168">Expires in 7 days</option>
+    </select>
+    <button id="submit">Drop pin</button>
+  </div>
 
-    // Load the map images (tiles) from OpenStreetMap
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script>
+    // ---- 1. Connect to Supabase ----
+    const SUPABASE_URL = 'https://ygtaomhhuizqiedlvbwf.supabase.co';
+    const SUPABASE_KEY = 'PASTE_YOUR_ANON_KEY_HERE'; // anon / publishable key only
+    const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // ---- 2. Map ----
+    const map = L.map('map').setView([-20.25, 57.55], 10);
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap contributors'
+      maxZoom: 19, attribution: '© OpenStreetMap contributors'
     }).addTo(map);
 
-    // When the map is tapped, drop a marker there
-    let marker;
-    map.on('click', (e) => {
-      if (marker) marker.remove();
-      marker = L.marker(e.latlng).addTo(map)
-        .bindPopup('Lat: ' + e.latlng.lat.toFixed(5) + '<br>Lng: ' + e.latlng.lng.toFixed(5))
-        .openPopup();
-    });
+    // ---- 3. Choosing a location (tap or search) ----
+    let chosen = null, chosenMarker = null;
+    function choose(latlng) {
+      chosen = latlng;
+      if (chosenMarker) chosenMarker.remove();
+      chosenMarker = L.marker(latlng).addTo(map);
+      document.getElementById('hint').textContent =
+        'Location chosen: ' + latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
+    }
+    map.on('click', (e) => choose(e.latlng));
+
+    document.getElementById('searchBtn').onclick = async () => {
+      const q = document.getElementById('search').value.trim();
+      if (!q) return;
+      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=mu&q='
+        + encodeURIComponent(q);
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (!data.length) { alert('Address not found'); return; }
+        const latlng = L.latLng(parseFloat(data[0].lat), parseFloat(data[0].lon));
+        map.setView(latlng, 16);
+        choose(latlng);
+      } catch (err) { alert('Search failed, try again.'); }
+    };
+
+    // ---- 4. Showing pins ----
+    const COLORS = { event: '#2563eb', quest: '#f97316' };
+    const markers = {}; // pin id -> { marker, expires }
+
+    function addPin(pin) {
+      if (markers[pin.id] || new Date(pin.expires_at) <= new Date()) return;
+      const marker = L.circleMarker([pin.lat, pin.lng], {
+        radius: 10, color: '#fff', weight: 2, fillColor: COLORS[pin.type], fillOpacity: 1
+      }).addTo(map);
+
+      // Build the popup with textContent so user text can never run as code
+      const box = document.createElement('div');
+      const h = document.createElement('strong'); h.textContent = pin.title;
+      const t = document.createElement('div'); t.textContent = pin.type === 'event' ? 'Event' : 'Side Quest';
+      const d = document.createElement('p'); d.textContent = pin.description || '';
+      const e = document.createElement('small'); e.textContent = 'Until ' + new Date(pin.expires_at).toLocaleString();
+      box.append(h, t, d, e);
+      marker.bindPopup(box);
+
+      markers[pin.id] = { marker, expires: new Date(pin.expires_at) };
+    }
+
+    async function loadPins() {
+      const { data, error } = await db.from('pins').select('*')
+        .gt('expires_at', new Date().toISOString());
+      if (error) { console.error(error); return; }
+      data.forEach(addPin);
+    }
+
+    // Remove expired pins from the map every minute
+    setInterval(() => {
+      const now = new Date();
+      for (const id in markers) {
+        if (markers[id].expires <= now) { markers[id].marker.remove(); delete markers[id]; }
+      }
+    }, 60000);
+
+    // ---- 5. Live updates ----
+    db.channel('pins-live')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pins' },
+          (payload) => addPin(payload.new))
+      .subscribe();
+
+    // ---- 6. Saving a new pin ----
+    document.getElementById('submit').onclick = async () => {
+      const title = document.getElementById('title').value.trim();
+      if (!chosen) { alert('Choose a location first.'); return; }
+      if (!title) { alert('Add a title.'); return; }
+      const hours = parseInt(document.getElementById('hours').value, 10);
+      const { error } = await db.from('pins').insert({
+        type: document.getElementById('type').value,
+        title,
+        description: document.getElementById('desc').value.trim() || null,
+        lat: chosen.lat,
+        lng: chosen.lng,
+        expires_at: new Date(Date.now() + hours * 3600000).toISOString()
+      });
+      if (error) { alert('Could not save: ' + error.message); return; }
+      document.getElementById('title').value = '';
+      document.getElementById('desc').value = '';
+      if (chosenMarker) chosenMarker.remove();
+      chosen = null;
+      document.getElementById('hint').textContent = 'Pin dropped! Tap the map to add another.';
+    };
+
+    loadPins();
   </script>
 </body>
 </html>
