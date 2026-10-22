@@ -25,6 +25,7 @@
     #panel input, #panel select, #panel textarea, #panel button { width: 100%; }
     button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
     button:disabled { background: #999; }
+    button.danger { background: #dc2626; margin-left: 6px; }
     #searchRow { display: flex; gap: 6px; }
     #searchRow button { width: auto; }
     #hint { font-size: 14px; color: #555; margin: 0; }
@@ -251,6 +252,13 @@
       if (!user) { b.textContent = 'Sign in to join'; b.onclick = () => modal.classList.remove('closed'); }
       else { b.textContent = set.has(user.id) ? 'Leave' : "I'm in"; b.onclick = () => toggleJoin(pin); }
       box.append(h, t, d, e, c, b);
+      if (user && pin.created_by === user.id) {
+        const del = document.createElement('button');
+        del.textContent = 'Delete pin';
+        del.className = 'danger';
+        del.onclick = () => deletePin(pin);
+        box.append(del);
+      }
       return box;
     }
 
@@ -268,6 +276,24 @@
       marker.bindPopup(buildPopup(pin));
       marker.on('popupopen', () => marker.setPopupContent(buildPopup(pin)));
       markers[pin.id] = { marker, expires: new Date(pin.expires_at) };
+    }
+
+    // Remove a pin from the map and from the app's memory
+    function removePin(id) {
+      const m = markers[id];
+      if (m) m.marker.remove();
+      delete markers[id];
+      delete pins[id];
+      delete joins[id];
+    }
+
+    async function deletePin(pin) {
+      if (!confirm('Delete "' + pin.title + '"? This cannot be undone.')) return;
+      // .select() returns the rows that were actually deleted
+      const { data, error } = await db.from('pins').delete().eq('id', pin.id).select();
+      if (error) { alert('Could not delete: ' + error.message); return; }
+      if (!data.length) { alert('You can only delete your own pins.'); return; }
+      removePin(pin.id);
     }
 
     async function toggleJoin(pin) {
@@ -305,6 +331,8 @@
     db.channel('live')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'pins' },
           (payload) => addPin(payload.new))
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'pins' },
+          (payload) => removePin(payload.old.id))
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'joins' },
           (payload) => {
             const r = payload.new;
