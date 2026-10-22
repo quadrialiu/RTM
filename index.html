@@ -29,6 +29,10 @@
     #searchRow button { width: auto; }
     #hint { font-size: 14px; color: #555; margin: 0; }
     #panel.closed { display: none; }
+    #results { max-height: 180px; overflow-y: auto; }
+    #results:empty { display: none; }
+    .result { padding: 10px 8px; border-bottom: 1px solid #eee; font-size: 15px; cursor: pointer; }
+    .result:active { background: #eef3ff; }
     #fab { position: fixed; right: 16px; bottom: 24px; z-index: 1000; border-radius: 28px;
       padding: 12px 18px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
     #modal { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.5);
@@ -65,6 +69,7 @@
       <input id="search" placeholder="Search an address or tap the map">
       <button id="searchBtn">Go</button>
     </div>
+    <div id="results"></div>
     <p id="hint">Tap the map or search to choose a location.</p>
     <select id="type">
       <option value="event">Event</option>
@@ -87,7 +92,7 @@
   <script>
     // ---- 1. Connect to Supabase ----
     const SUPABASE_URL = 'https://ygtaomhhuizqiedlvbwf.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_lbCUe4xmCRuR0X5Jc_pOqQ_HhXWe1LC'; // anon / publishable key only
+    const SUPABASE_KEY = 'PASTE_YOUR_ANON_KEY_HERE'; // anon / publishable key only
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     // ---- 2. Sign-in (email magic link) ----
@@ -167,19 +172,64 @@
     document.getElementById('closePanel').onclick = () => setPanel(false);
     map.on('click', (e) => { if (!panel.classList.contains('closed')) choose(e.latlng); });
 
-    document.getElementById('searchBtn').onclick = async () => {
-      const q = document.getElementById('search').value.trim();
-      if (!q) return;
-      const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=mu&q='
-        + encodeURIComponent(q);
+    // ---- Search with suggestions (Photon, built on OpenStreetMap) ----
+    const searchEl = document.getElementById('search');
+    const resultsEl = document.getElementById('results');
+    let searchTimer, searchSeq = 0, lastResults = [];
+
+    // Turn a result into readable text, e.g. "Caudan Waterfront, Port Louis"
+    function labelFor(p) {
+      const parts = [p.name, p.street, p.district, p.city].filter(Boolean);
+      return [...new Set(parts)].join(', ');
+    }
+
+    function showResults(features) {
+      resultsEl.replaceChildren();
+      lastResults = features;
+      features.forEach((f) => {
+        const row = document.createElement('div');
+        row.className = 'result';
+        row.textContent = labelFor(f.properties);
+        row.onclick = () => pick(f);
+        resultsEl.append(row);
+      });
+    }
+
+    // Choosing a result moves the map there and picks the location
+    function pick(f) {
+      const [lng, lat] = f.geometry.coordinates; // Photon gives longitude first
+      const latlng = L.latLng(lat, lng);
+      searchEl.value = labelFor(f.properties);
+      resultsEl.replaceChildren();
+      lastResults = [];
+      map.setView(latlng, 16);
+      choose(latlng);
+    }
+
+    async function searchPlaces(q) {
+      const seq = ++searchSeq;
+      const url = 'https://photon.komoot.io/api/?limit=6&lat=-20.25&lon=57.55'
+        + '&bbox=57.2,-20.6,57.9,-19.9&q=' + encodeURIComponent(q);
       try {
         const res = await fetch(url);
         const data = await res.json();
-        if (!data.length) { alert('Address not found'); return; }
-        const latlng = L.latLng(parseFloat(data[0].lat), parseFloat(data[0].lon));
-        map.setView(latlng, 16);
-        choose(latlng);
-      } catch (err) { alert('Search failed, try again.'); }
+        if (seq !== searchSeq) return; // a newer search has replaced this one
+        showResults(data.features || []);
+      } catch (err) { /* network hiccup: keep the current list */ }
+    }
+
+    // Wait 300ms after the last keystroke so we don't search on every letter
+    searchEl.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = searchEl.value.trim();
+      if (q.length < 3) { searchSeq++; lastResults = []; resultsEl.replaceChildren(); return; }
+      searchTimer = setTimeout(() => searchPlaces(q), 300);
+    });
+
+    // "Go" picks the top suggestion
+    document.getElementById('searchBtn').onclick = () => {
+      if (lastResults.length) pick(lastResults[0]);
+      else alert('Type at least 3 letters and wait for suggestions.');
     };
 
     // ---- 5. Showing pins and joins ----
