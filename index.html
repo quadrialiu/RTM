@@ -28,6 +28,16 @@
     #searchRow { display: flex; gap: 6px; }
     #searchRow button { width: auto; }
     #hint { font-size: 14px; color: #555; margin: 0; }
+    #panel.closed { display: none; }
+    #fab { position: fixed; right: 16px; bottom: 24px; z-index: 1000; border-radius: 28px;
+      padding: 12px 18px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+    #modal { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.5);
+      display: flex; align-items: center; justify-content: center; }
+    #modal.closed { display: none; }
+    #modal .card { background: #fff; padding: 16px; border-radius: 12px; width: 90%;
+      max-width: 360px; display: grid; gap: 8px; }
+    #modal input, #modal button { width: 100%; }
+    button.secondary { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
   </style>
 </head>
 <body>
@@ -35,7 +45,22 @@
 
   <div id="auth"></div>
 
-  <div id="panel">
+  <button id="fab">+ Add pin</button>
+
+  <div id="modal" class="closed">
+    <div class="card">
+      <h3 style="margin:0">Welcome to Live Pins</h3>
+      <input id="em" type="email" placeholder="Email" autocomplete="email">
+      <input id="pw" type="password" placeholder="Password (min 6 characters)" autocomplete="current-password">
+      <button id="signin">Sign in</button>
+      <button id="signup" class="secondary">Create account</button>
+      <button id="google" class="secondary">Continue with Google</button>
+      <button id="cancel" class="secondary">Cancel</button>
+    </div>
+  </div>
+
+  <div id="panel" class="closed">
+    <button id="closePanel" class="secondary">Close</button>
     <div id="searchRow">
       <input id="search" placeholder="Search an address or tap the map">
       <button id="searchBtn">Go</button>
@@ -62,12 +87,13 @@
   <script>
     // ---- 1. Connect to Supabase ----
     const SUPABASE_URL = 'https://ygtaomhhuizqiedlvbwf.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_lbCUe4xmCRuR0X5Jc_pOqQ_HhXWe1LC'; // anon / publishable key only
+    const SUPABASE_KEY = 'PASTE_YOUR_ANON_KEY_HERE'; // anon / publishable key only
     const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     // ---- 2. Sign-in (email magic link) ----
     let user = null;
     const authBox = document.getElementById('auth');
+    const modal = document.getElementById('modal');
 
     function renderAuth() {
       authBox.replaceChildren();
@@ -80,25 +106,36 @@
         out.onclick = () => db.auth.signOut();
         authBox.append(who, out);
       } else {
-        const email = document.createElement('input');
-        email.type = 'email';
-        email.placeholder = 'Your email to sign in';
+        const label = document.createElement('span');
+        label.style.flex = '1';
+        label.textContent = 'Live Pins';
         const go = document.createElement('button');
-        go.textContent = 'Email me a link';
-        go.onclick = async () => {
-          if (!email.value.trim()) return;
-          const { error } = await db.auth.signInWithOtp({
-            email: email.value.trim(),
-            options: { emailRedirectTo: window.location.origin + window.location.pathname }
-          });
-          alert(error ? 'Error: ' + error.message : 'Check your email for the sign-in link.');
-        };
-        authBox.append(email, go);
+        go.textContent = 'Sign in / Sign up';
+        go.onclick = () => modal.classList.remove('closed');
+        authBox.append(label, go);
       }
     }
 
+    const redirectTo = window.location.origin + window.location.pathname;
+    const emailEl = document.getElementById('em'), pwEl = document.getElementById('pw');
+    document.getElementById('cancel').onclick = () => modal.classList.add('closed');
+    document.getElementById('signin').onclick = async () => {
+      const { error } = await db.auth.signInWithPassword({ email: emailEl.value.trim(), password: pwEl.value });
+      if (error) alert(error.message);
+    };
+    document.getElementById('signup').onclick = async () => {
+      const { data, error } = await db.auth.signUp({
+        email: emailEl.value.trim(), password: pwEl.value, options: { emailRedirectTo: redirectTo }
+      });
+      if (error) { alert(error.message); return; }
+      if (!data.session) alert('Account created. Check your email to confirm it, then sign in.');
+    };
+    document.getElementById('google').onclick = () =>
+      db.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+
     db.auth.onAuthStateChange((event, session) => {
       user = session ? session.user : null;
+      if (user) modal.classList.add('closed');
       renderAuth();
       for (const id in markers) refreshPopup(id);
     });
@@ -119,7 +156,16 @@
       document.getElementById('hint').textContent =
         'Location chosen: ' + latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
     }
-    map.on('click', (e) => choose(e.latlng));
+    const panel = document.getElementById('panel');
+    const fab = document.getElementById('fab');
+    function setPanel(open) {
+      panel.classList.toggle('closed', !open);
+      fab.style.display = open ? 'none' : 'block';
+      if (!open && chosenMarker) { chosenMarker.remove(); chosenMarker = null; chosen = null; }
+    }
+    fab.onclick = () => { if (user) setPanel(true); else modal.classList.remove('closed'); };
+    document.getElementById('closePanel').onclick = () => setPanel(false);
+    map.on('click', (e) => { if (!panel.classList.contains('closed')) choose(e.latlng); });
 
     document.getElementById('searchBtn').onclick = async () => {
       const q = document.getElementById('search').value.trim();
@@ -152,7 +198,7 @@
       const c = document.createElement('p');
       c.textContent = set.size + (pin.max_people ? ' / ' + pin.max_people : '') + ' joined';
       const b = document.createElement('button');
-      if (!user) { b.textContent = 'Sign in to join'; b.disabled = true; }
+      if (!user) { b.textContent = 'Sign in to join'; b.onclick = () => modal.classList.remove('closed'); }
       else { b.textContent = set.has(user.id) ? 'Leave' : "I'm in"; b.onclick = () => toggleJoin(pin); }
       box.append(h, t, d, e, c, b);
       return box;
@@ -244,9 +290,8 @@
       document.getElementById('title').value = '';
       document.getElementById('desc').value = '';
       document.getElementById('max').value = '';
-      if (chosenMarker) chosenMarker.remove();
-      chosen = null;
-      document.getElementById('hint').textContent = 'Pin dropped! Tap the map to add another.';
+      setPanel(false);
+      document.getElementById('hint').textContent = 'Tap the map or search to choose a location.';
     };
 
     renderAuth();
