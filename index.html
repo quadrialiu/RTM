@@ -78,7 +78,7 @@
     </select>
     <input id="title" placeholder="Title" maxlength="80">
     <textarea id="desc" placeholder="Description (optional)" rows="2" maxlength="300"></textarea>
-    <input id="max" type="number" min="1" placeholder="Max people (optional)">
+    <input id="max" type="number" min="1" placeholder="Spots for others (optional)">
     <select id="hours">
       <option value="3">Expires in 3 hours</option>
       <option value="24" selected>Expires in 24 hours</option>
@@ -251,7 +251,14 @@
       const b = document.createElement('button');
       if (!user) { b.textContent = 'Sign in to join'; b.onclick = () => modal.classList.remove('closed'); }
       else { b.textContent = set.has(user.id) ? 'Leave' : "I'm in"; b.onclick = () => toggleJoin(pin); }
-      box.append(h, t, d, e, c, b);
+      const isHost = user && pin.created_by === user.id;
+      if (isHost) {
+        const hostNote = document.createElement('p');
+        hostNote.textContent = 'You are hosting this pin.';
+        box.append(h, t, d, e, c, hostNote);
+      } else {
+        box.append(h, t, d, e, c, b);
+      }
       if (user && pin.created_by === user.id) {
         const del = document.createElement('button');
         del.textContent = 'Delete pin';
@@ -297,6 +304,7 @@
     }
 
     async function toggleJoin(pin) {
+      if (pin.created_by === user.id) return; // hosts don't join their own pins
       const set = joins[pin.id] || (joins[pin.id] = new Set());
       if (set.has(user.id)) {
         const { error } = await db.from('joins').delete().eq('pin_id', pin.id).eq('user_id', user.id);
