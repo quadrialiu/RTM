@@ -5,54 +5,84 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live Pins</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;700;800;900&display=swap">
   <style>
-    html, body, #map { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
-    #auth {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 1000; background: #fff;
-      padding: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.25);
-      display: flex; gap: 6px; align-items: center; font-size: 14px;
-    }
-    #auth input { flex: 1; min-width: 0; }
-    #panel {
-      position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000;
-      background: #fff; padding: 12px; box-shadow: 0 -2px 10px rgba(0,0,0,.25);
-      display: grid; gap: 8px; max-width: 500px; margin: 0 auto;
-      border-radius: 12px 12px 0 0;
-    }
-    input, select, textarea, button {
-      font-size: 16px; padding: 8px; border: 1px solid #bbb; border-radius: 6px; box-sizing: border-box;
-    }
-    #panel input, #panel select, #panel textarea, #panel button { width: 100%; }
-    button { background: #2563eb; color: #fff; border: none; cursor: pointer; }
-    button:disabled { background: #999; }
-    button.danger { background: #dc2626; margin-left: 6px; }
-    #searchRow { display: flex; gap: 6px; }
-    #searchRow button { width: auto; }
-    #hint { font-size: 14px; color: #555; margin: 0; }
-    #panel.closed { display: none; }
-    #results { max-height: 180px; overflow-y: auto; }
-    #results:empty { display: none; }
-    .result { padding: 10px 8px; border-bottom: 1px solid #eee; font-size: 15px; cursor: pointer; }
-    .result:active { background: #eef3ff; }
-    #fab { position: fixed; right: 16px; bottom: 24px; z-index: 1000; border-radius: 28px;
-      padding: 12px 18px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
-    #modal { position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,.5);
-      display: flex; align-items: center; justify-content: center; }
-    #modal.closed { display: none; }
-    #modal .card { background: #fff; padding: 16px; border-radius: 12px; width: 90%;
-      max-width: 360px; display: grid; gap: 8px; }
-    #modal input, #modal button { width: 100%; }
-    button.secondary { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
-    .fields { display: grid; gap: 6px; }
-    .fields label, .note { font-size: 13px; color: #555; margin: 0; }
-    #quick { display: flex; gap: 6px; }
-    #quick button { flex: 1; width: auto; }
+    /* Theme: change colors here. --tile-filter tints the map; set it to none for the plain map. */
+    :root { --ink:#1F1300; --pink:#D81E5B; --violet:#6D28D9; --orange:#F97316; --yellow:#FFD23F; --muted:#4A3A1A;
+      --tile-filter: sepia(.45) saturate(1.5) hue-rotate(-8deg) brightness(1.04); }
+    html, body, #map { height:100%; margin:0; font-family:'Nunito', system-ui, sans-serif; color:var(--ink); }
+    .leaflet-tile-pane { filter: var(--tile-filter); }
+    .leaflet-top.leaflet-right { top:136px; }
+    .closed { display:none !important; }
+    button { font:inherit; font-size:16px; font-weight:800; min-height:44px; padding:0 18px; border-radius:999px;
+      border:3px solid var(--ink); background:var(--violet); color:#fff; cursor:pointer; }
+    button:disabled { opacity:.6; }
+    button.secondary { background:#fff; color:var(--ink); }
+    button.danger { background:#B91C1C; }
+    input, select, textarea { font:inherit; font-size:16px; padding:10px 12px; border:3px solid var(--ink);
+      border-radius:14px; box-sizing:border-box; background:#fff; color:var(--ink); width:100%; }
+    #auth { position:fixed; top:12px; left:12px; right:12px; z-index:1000; height:56px; box-sizing:border-box;
+      padding:0 8px 0 18px; display:flex; align-items:center; justify-content:space-between; gap:8px;
+      background:var(--pink); border:3px solid var(--ink); border-radius:999px; box-shadow:4px 4px 0 var(--ink);
+      color:#fff; font-size:20px; font-weight:900; }
+    #auth button { background:transparent; border:0; min-height:44px; padding:0 10px; font-size:15px; }
+    #chips { position:fixed; top:80px; left:12px; right:12px; z-index:1000; display:flex; gap:8px; }
+    .chip { background:#fff; color:var(--ink); padding:0 16px; font-size:14px; }
+    .chip.on { background:var(--ink); color:#fff; }
+    #fab { position:fixed; right:16px; bottom:24px; z-index:1000; background:var(--yellow); color:var(--ink);
+      box-shadow:4px 4px 0 var(--ink); }
+    .card { position:fixed; left:12px; right:12px; bottom:20px; z-index:1000; max-width:500px; margin:0 auto;
+      box-sizing:border-box; padding:18px; background:#fff; border:3px solid var(--ink); border-radius:28px;
+      box-shadow:6px 6px 0 var(--ink); max-height:80vh; overflow-y:auto; }
+    #panel { display:grid; gap:8px; }
+    #modal { position:fixed; inset:0; z-index:2000; background:rgba(31,19,0,.55); display:flex;
+      align-items:center; justify-content:center; }
+    #modal .card { position:static; display:grid; gap:8px; width:90%; max-width:360px; margin:0; }
+    #searchRow { display:flex; gap:6px; }
+    #searchRow button { width:auto; }
+    #hint, .note, .fields label { font-size:13px; color:var(--muted); margin:0; font-weight:700; }
+    .fields { display:grid; gap:6px; }
+    #quick { display:flex; gap:6px; }
+    #quick button { flex:1; padding:0 8px; font-size:14px; }
+    #results { max-height:180px; overflow-y:auto; }
+    #results:empty { display:none; }
+    .result { padding:10px 8px; border-bottom:2px solid #eee; font-size:15px; font-weight:700; cursor:pointer; }
+    #sheetBody h2 { margin:10px 0 4px; font-size:22px; font-weight:800; line-height:1.2; padding-right:60px; }
+    #sheetBody p { margin:6px 0 0; font-size:14px; }
+    #sheetBody button { width:100%; margin-top:6px; }
+    .muted { color:var(--muted); }
+    #sheetBody p.info { font-weight:800; margin:10px 0 14px; }
+    .x { position:absolute; top:10px; right:12px; min-height:36px; padding:0 12px; font-size:13px;
+      background:#fff; color:var(--ink); }
+    .tag { display:inline-block; padding:3px 10px; border-radius:999px; font-size:12px; font-weight:800; }
+    .tag.event { background:#EDE9FE; color:#4C1D95; }
+    .tag.quest { background:#FFEDD5; color:#7C2D12; }
+    .pin-wrap { background:none; border:0; }
+    .dot { width:24px; height:24px; box-sizing:border-box; border-radius:50%; border:4px solid #fff;
+      box-shadow:3px 3px 0 var(--ink); }
+    .teardrop { position:relative; width:30px; height:30px; box-sizing:border-box; border:3px solid var(--ink);
+      border-radius:50% 50% 50% 0; transform:rotate(-45deg); box-shadow:3px 3px 0 var(--ink); }
+    .teardrop::after { content:''; position:absolute; left:7px; top:7px; width:10px; height:10px;
+      border-radius:50%; background:#fff; }
+    .dot.event, .teardrop.event { background:var(--violet); }
+    .dot.quest, .teardrop.quest { background:var(--orange); }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
   <div id="auth"></div>
+
+  <div id="chips">
+    <button class="chip on" data-f="all">All</button>
+    <button class="chip" data-f="event">Events</button>
+    <button class="chip" data-f="quest">Side quests</button>
+  </div>
+
+  <div id="sheet" class="card closed">
+    <button id="closeSheet" class="x">Close</button>
+    <div id="sheetBody"></div>
+  </div>
 
   <button id="fab">+ Add pin</button>
 
@@ -68,7 +98,7 @@
     </div>
   </div>
 
-  <div id="panel" class="closed">
+  <div id="panel" class="card closed">
     <button id="closePanel" class="secondary">Close</button>
     <div id="searchRow">
       <input id="search" placeholder="Search an address or tap the map">
@@ -125,18 +155,17 @@
       authBox.replaceChildren();
       if (user) {
         const who = document.createElement('span');
-        who.style.flex = '1';
-        who.textContent = 'Signed in: ' + user.email;
+        who.textContent = 'Live Pins';
+        who.title = user.email;
         const out = document.createElement('button');
         out.textContent = 'Sign out';
         out.onclick = () => db.auth.signOut();
         authBox.append(who, out);
       } else {
         const label = document.createElement('span');
-        label.style.flex = '1';
         label.textContent = 'Live Pins';
         const go = document.createElement('button');
-        go.textContent = 'Sign in / Sign up';
+        go.textContent = 'Sign in';
         go.onclick = () => modal.classList.remove('closed');
         authBox.append(label, go);
       }
@@ -179,7 +208,7 @@
     function choose(latlng) {
       chosen = latlng;
       if (chosenMarker) chosenMarker.remove();
-      chosenMarker = L.marker(latlng).addTo(map);
+      chosenMarker = L.marker(latlng, { icon: dotIcon(typeEl.value, true) }).addTo(map);
       document.getElementById('hint').textContent =
         'Location chosen: ' + latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
     }
@@ -205,6 +234,7 @@
       evEnd.value = toInput(new Date(now + 4 * 3600000));
     }
     function updateFormType() {
+      if (chosenMarker) chosenMarker.setIcon(dotIcon(typeEl.value, true));
       const isQuest = typeEl.value === 'quest';
       document.getElementById('questFields').style.display = isQuest ? 'grid' : 'none';
       document.getElementById('eventFields').style.display = isQuest ? 'none' : 'grid';
@@ -225,12 +255,13 @@
     function setPanel(open) {
       panel.classList.toggle('closed', !open);
       if (open) setDefaults();
-      fab.style.display = open ? 'none' : 'block';
+      if (open) closeSheet();
+      updateFab();
       if (!open && chosenMarker) { chosenMarker.remove(); chosenMarker = null; chosen = null; }
     }
     fab.onclick = () => { if (user) setPanel(true); else modal.classList.remove('closed'); };
     document.getElementById('closePanel').onclick = () => setPanel(false);
-    map.on('click', (e) => { if (!panel.classList.contains('closed')) choose(e.latlng); });
+    map.on('click', (e) => { if (!panel.classList.contains('closed')) choose(e.latlng); else closeSheet(); });
 
     // ---- Search with suggestions (Photon, built on OpenStreetMap) ----
     const searchEl = document.getElementById('search');
@@ -293,7 +324,6 @@
     };
 
     // ---- 5. Showing pins and joins ----
-    const COLORS = { event: '#2563eb', quest: '#f97316' };
     const pins = {};    // pin id -> pin data
     const markers = {}; // pin id -> { marker, expires }
     const joins = {};   // pin id -> Set of user ids
@@ -317,57 +347,103 @@
       refreshPopup(id);
     }
 
+    // The bottom sheet's contents for one pin
     function buildPopup(pin) {
       const set = joins[pin.id] || new Set();
       const box = document.createElement('div');
-      const h = document.createElement('strong'); h.textContent = pin.title;
-      const t = document.createElement('div'); t.textContent = pin.type === 'event' ? 'Event' : 'Side Quest';
-      const d = document.createElement('p'); d.textContent = pin.description || '';
-      const e = document.createElement('small'); e.textContent = whenText(pin);
-      const k = document.createElement('p');
-      k.textContent = (user && contacts[pin.id]) ? 'Contact: ' + contacts[pin.id] : '';
-      if (!k.textContent) k.style.display = 'none';
-      const c = document.createElement('p');
-      c.textContent = set.size + (pin.max_people ? ' / ' + pin.max_people : '') + ' joined';
-      const b = document.createElement('button');
-      if (!user) { b.textContent = 'Sign in to join'; b.onclick = () => modal.classList.remove('closed'); }
-      else { b.textContent = set.has(user.id) ? 'Leave' : "I'm in"; b.onclick = () => toggleJoin(pin); }
-      const isHost = user && pin.created_by === user.id;
-      if (isHost) {
-        const hostNote = document.createElement('p');
-        hostNote.textContent = 'You are hosting this pin.';
-        box.append(h, t, d, e, k, c, hostNote);
-      } else {
-        box.append(h, t, d, e, k, c, b);
+      const tag = document.createElement('span');
+      tag.className = 'tag ' + pin.type;
+      tag.textContent = pin.type === 'event' ? 'Event' : 'Side quest';
+      const h = document.createElement('h2'); h.textContent = pin.title;
+      const when = document.createElement('p'); when.className = 'muted'; when.textContent = whenText(pin);
+      box.append(tag, h, when);
+      if (pin.description) {
+        const d = document.createElement('p'); d.className = 'muted'; d.textContent = pin.description;
+        box.append(d);
       }
+      const info = document.createElement('p'); info.className = 'info';
+      info.textContent = set.size + (pin.max_people ? ' of ' + pin.max_people : '') + ' joined'
+        + ((user && contacts[pin.id]) ? ' · Contact: ' + contacts[pin.id] : '');
+      box.append(info);
       if (user && pin.created_by === user.id) {
-        const del = document.createElement('button');
-        del.textContent = 'Delete pin';
-        del.className = 'danger';
+        const note = document.createElement('p'); note.className = 'muted'; note.textContent = 'You are hosting this pin.';
+        const del = document.createElement('button'); del.className = 'danger'; del.textContent = 'Delete pin';
         del.onclick = () => deletePin(pin);
-        box.append(del);
+        box.append(note, del);
+      } else {
+        const b = document.createElement('button');
+        if (!user) { b.textContent = 'Sign in to join'; b.onclick = () => modal.classList.remove('closed'); }
+        else { b.textContent = set.has(user.id) ? 'Leave' : "I'm in"; b.onclick = () => toggleJoin(pin); }
+        box.append(b);
       }
       return box;
     }
 
-    function refreshPopup(id) {
-      const m = markers[id];
-      if (m && m.marker.isPopupOpen()) m.marker.setPopupContent(buildPopup(pins[id]));
+    // Dots by default; the selected pin becomes a teardrop
+    function dotIcon(type, selected) {
+      return L.divIcon({
+        className: 'pin-wrap',
+        html: '<div class="' + (selected ? 'teardrop ' : 'dot ') + type + '"></div>',
+        iconSize: selected ? [30, 30] : [24, 24],
+        iconAnchor: selected ? [15, 36] : [12, 12]
+      });
     }
+
+    const sheet = document.getElementById('sheet');
+    const sheetBody = document.getElementById('sheetBody');
+    let selectedId = null, filter = 'all';
+
+    function updateFab() {
+      fab.style.display = (panel.classList.contains('closed') && sheet.classList.contains('closed')) ? 'block' : 'none';
+    }
+    function renderSheet() { sheetBody.replaceChildren(buildPopup(pins[selectedId])); }
+    function refreshPopup(id) { if (id === selectedId && pins[id]) renderSheet(); }
+
+    function selectPin(id) {
+      if (!panel.classList.contains('closed')) return; // busy adding a pin
+      if (selectedId && markers[selectedId]) markers[selectedId].marker.setIcon(dotIcon(pins[selectedId].type, false));
+      selectedId = id;
+      markers[id].marker.setIcon(dotIcon(pins[id].type, true));
+      renderSheet();
+      sheet.classList.remove('closed');
+      updateFab();
+      loadContact(id);
+      map.panTo(markers[id].marker.getLatLng());
+    }
+    function closeSheet() {
+      if (selectedId && markers[selectedId]) markers[selectedId].marker.setIcon(dotIcon(pins[selectedId].type, false));
+      selectedId = null;
+      sheet.classList.add('closed');
+      updateFab();
+    }
+    document.getElementById('closeSheet').onclick = closeSheet;
+
+    // Show or hide a pin depending on the active filter chip
+    function syncMarker(id) {
+      const ok = filter === 'all' || pins[id].type === filter;
+      if (ok) markers[id].marker.addTo(map); else markers[id].marker.remove();
+    }
+    document.querySelectorAll('#chips .chip').forEach((chip) => {
+      chip.onclick = () => {
+        filter = chip.dataset.f;
+        document.querySelectorAll('#chips .chip').forEach((c) => c.classList.toggle('on', c === chip));
+        for (const id in markers) syncMarker(id);
+        if (selectedId && pins[selectedId].type !== filter && filter !== 'all') closeSheet();
+      };
+    });
 
     function addPin(pin) {
       if (markers[pin.id] || new Date(pin.expires_at) <= new Date()) return;
       pins[pin.id] = pin;
-      const marker = L.circleMarker([pin.lat, pin.lng], {
-        radius: 10, color: '#fff', weight: 2, fillColor: COLORS[pin.type], fillOpacity: 1
-      }).addTo(map);
-      marker.bindPopup(buildPopup(pin));
-      marker.on('popupopen', () => { marker.setPopupContent(buildPopup(pin)); loadContact(pin.id); });
+      const marker = L.marker([pin.lat, pin.lng], { icon: dotIcon(pin.type, false) });
+      marker.on('click', () => selectPin(pin.id));
       markers[pin.id] = { marker, expires: new Date(pin.expires_at) };
+      syncMarker(pin.id);
     }
 
     // Remove a pin from the map and from the app's memory
     function removePin(id) {
+      if (id === selectedId) { selectedId = null; sheet.classList.add('closed'); updateFab(); }
       const m = markers[id];
       if (m) m.marker.remove();
       delete markers[id];
@@ -412,7 +488,7 @@
     setInterval(() => {
       const now = new Date();
       for (const id in markers) {
-        if (markers[id].expires <= now) { markers[id].marker.remove(); delete markers[id]; }
+        if (markers[id].expires <= now) removePin(id);
       }
     }, 60000);
 
