@@ -43,6 +43,10 @@
       max-width: 360px; display: grid; gap: 8px; }
     #modal input, #modal button { width: 100%; }
     button.secondary { background: #fff; color: #2563eb; border: 1px solid #2563eb; }
+    .fields { display: grid; gap: 6px; }
+    .fields label, .note { font-size: 13px; color: #555; margin: 0; }
+    #quick { display: flex; gap: 6px; }
+    #quick button { flex: 1; width: auto; }
   </style>
 </head>
 <body>
@@ -79,12 +83,28 @@
     <input id="title" placeholder="Title" maxlength="80">
     <textarea id="desc" placeholder="Description (optional)" rows="2" maxlength="300"></textarea>
     <input id="max" type="number" min="1" placeholder="Spots for others (optional)">
-    <select id="hours">
-      <option value="3">Expires in 3 hours</option>
-      <option value="24" selected>Expires in 24 hours</option>
-      <option value="72">Expires in 3 days</option>
-      <option value="168">Expires in 7 days</option>
-    </select>
+    <div id="questFields" class="fields">
+      <label>Pin disappears at</label>
+      <input id="questExpiry" type="datetime-local">
+      <div id="quick">
+        <button type="button" class="secondary" data-h="1">1 hour</button>
+        <button type="button" class="secondary" data-h="3">3 hours</button>
+        <button type="button" class="secondary" id="tonight">Tonight</button>
+      </div>
+    </div>
+    <div id="eventFields" class="fields">
+      <label>Starts</label>
+      <input id="evStart" type="datetime-local">
+      <label>Ends</label>
+      <input id="evEnd" type="datetime-local">
+      <label>Remove the pin when the event</label>
+      <select id="evRemove">
+        <option value="begin">begins</option>
+        <option value="end" selected>ends</option>
+      </select>
+    </div>
+    <input id="contact" maxlength="100" placeholder="Contact, e.g. @name on Instagram (optional)">
+    <p class="note">Only signed-in users can see your contact. Share only what you are comfortable with.</p>
     <button id="submit">Drop pin</button>
   </div>
 
@@ -142,6 +162,7 @@
     db.auth.onAuthStateChange((event, session) => {
       user = session ? session.user : null;
       if (user) modal.classList.add('closed');
+      contacts = {};
       renderAuth();
       for (const id in markers) refreshPopup(id);
     });
@@ -164,8 +185,46 @@
     }
     const panel = document.getElementById('panel');
     const fab = document.getElementById('fab');
+    const typeEl = document.getElementById('type');
+    const questExpiry = document.getElementById('questExpiry');
+    const evStart = document.getElementById('evStart');
+    const evEnd = document.getElementById('evEnd');
+    const evRemove = document.getElementById('evRemove');
+    const contactEl = document.getElementById('contact');
+
+    const pad = (n) => String(n).padStart(2, '0');
+    // Format a Date the way <input type="datetime-local"> expects (local time)
+    function toInput(d) {
+      return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate())
+        + 'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+    }
+    function setDefaults() {
+      const now = Date.now();
+      questExpiry.value = toInput(new Date(now + 3 * 3600000));
+      evStart.value = toInput(new Date(now + 3600000));
+      evEnd.value = toInput(new Date(now + 4 * 3600000));
+    }
+    function updateFormType() {
+      const isQuest = typeEl.value === 'quest';
+      document.getElementById('questFields').style.display = isQuest ? 'grid' : 'none';
+      document.getElementById('eventFields').style.display = isQuest ? 'none' : 'grid';
+    }
+    typeEl.addEventListener('change', updateFormType);
+    document.querySelectorAll('#quick [data-h]').forEach((btn) => {
+      btn.onclick = () => { questExpiry.value = toInput(new Date(Date.now() + btn.dataset.h * 3600000)); };
+    });
+    document.getElementById('tonight').onclick = () => {
+      const d = new Date();
+      d.setHours(23, 59, 0, 0);
+      if (d - Date.now() < 30 * 60000) d.setDate(d.getDate() + 1); // too close to midnight: use tomorrow night
+      questExpiry.value = toInput(d);
+    };
+    updateFormType();
+    setDefaults();
+
     function setPanel(open) {
       panel.classList.toggle('closed', !open);
+      if (open) setDefaults();
       fab.style.display = open ? 'none' : 'block';
       if (!open && chosenMarker) { chosenMarker.remove(); chosenMarker = null; chosen = null; }
     }
@@ -239,13 +298,35 @@
     const markers = {}; // pin id -> { marker, expires }
     const joins = {};   // pin id -> Set of user ids
 
+    const FMT = { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' };
+    function fmt(v) { return new Date(v).toLocaleString([], FMT); }
+    function whenText(pin) {
+      if (!pin.start_time) return 'Disappears ' + fmt(pin.expires_at);
+      let text = 'Starts ' + fmt(pin.start_time);
+      if (pin.end_time) text += ' · ends ' + fmt(pin.end_time);
+      const atStart = new Date(pin.expires_at).getTime() === new Date(pin.start_time).getTime();
+      return text + ' · pin disappears when it ' + (atStart ? 'begins' : 'ends');
+    }
+
+    // Contacts live in their own table that only signed-in users can read
+    let contacts = {};
+    async function loadContact(id) {
+      if (!user || contacts[id] !== undefined) return;
+      const { data } = await db.from('pin_contacts').select('contact').eq('pin_id', id).maybeSingle();
+      contacts[id] = data ? data.contact : null;
+      refreshPopup(id);
+    }
+
     function buildPopup(pin) {
       const set = joins[pin.id] || new Set();
       const box = document.createElement('div');
       const h = document.createElement('strong'); h.textContent = pin.title;
       const t = document.createElement('div'); t.textContent = pin.type === 'event' ? 'Event' : 'Side Quest';
       const d = document.createElement('p'); d.textContent = pin.description || '';
-      const e = document.createElement('small'); e.textContent = 'Until ' + new Date(pin.expires_at).toLocaleString();
+      const e = document.createElement('small'); e.textContent = whenText(pin);
+      const k = document.createElement('p');
+      k.textContent = (user && contacts[pin.id]) ? 'Contact: ' + contacts[pin.id] : '';
+      if (!k.textContent) k.style.display = 'none';
       const c = document.createElement('p');
       c.textContent = set.size + (pin.max_people ? ' / ' + pin.max_people : '') + ' joined';
       const b = document.createElement('button');
@@ -255,9 +336,9 @@
       if (isHost) {
         const hostNote = document.createElement('p');
         hostNote.textContent = 'You are hosting this pin.';
-        box.append(h, t, d, e, c, hostNote);
+        box.append(h, t, d, e, k, c, hostNote);
       } else {
-        box.append(h, t, d, e, c, b);
+        box.append(h, t, d, e, k, c, b);
       }
       if (user && pin.created_by === user.id) {
         const del = document.createElement('button');
@@ -281,7 +362,7 @@
         radius: 10, color: '#fff', weight: 2, fillColor: COLORS[pin.type], fillOpacity: 1
       }).addTo(map);
       marker.bindPopup(buildPopup(pin));
-      marker.on('popupopen', () => marker.setPopupContent(buildPopup(pin)));
+      marker.on('popupopen', () => { marker.setPopupContent(buildPopup(pin)); loadContact(pin.id); });
       markers[pin.id] = { marker, expires: new Date(pin.expires_at) };
     }
 
@@ -361,21 +442,53 @@
       const title = document.getElementById('title').value.trim();
       if (!chosen) { alert('Choose a location first.'); return; }
       if (!title) { alert('Add a title.'); return; }
-      const hours = parseInt(document.getElementById('hours').value, 10);
+      const type = typeEl.value;
       const max = parseInt(document.getElementById('max').value, 10);
-      const { error } = await db.from('pins').insert({
-        type: document.getElementById('type').value,
+      const now = Date.now();
+      let start = null, end = null, expires;
+
+      if (type === 'quest') {
+        expires = new Date(questExpiry.value);
+        if (isNaN(expires)) { alert('Pick when the pin should disappear.'); return; }
+      } else {
+        start = new Date(evStart.value);
+        if (isNaN(start)) { alert('Pick a start date and time.'); return; }
+        if (start.getTime() <= now) { alert('The start must be in the future.'); return; }
+        if (evEnd.value) {
+          end = new Date(evEnd.value);
+          if (end <= start) { alert('The end must be after the start.'); return; }
+        }
+        if (evRemove.value === 'end') {
+          if (!end) { alert('Add an end time, or choose to remove the pin when the event begins.'); return; }
+          expires = end;
+        } else {
+          expires = start;
+        }
+      }
+      if (expires.getTime() <= now) { alert('The pin must disappear at a future time.'); return; }
+      if (expires.getTime() - now > 30 * 86400000) { alert('Pins can last at most 30 days.'); return; }
+
+      const contact = contactEl.value.trim();
+      const { data: row, error } = await db.from('pins').insert({
+        type,
         title,
         description: document.getElementById('desc').value.trim() || null,
         lat: chosen.lat,
         lng: chosen.lng,
         max_people: max > 0 ? max : null,
-        expires_at: new Date(Date.now() + hours * 3600000).toISOString()
-      });
+        start_time: start ? start.toISOString() : null,
+        end_time: end ? end.toISOString() : null,
+        expires_at: expires.toISOString()
+      }).select().single();
       if (error) { alert('Could not save: ' + error.message); return; }
+      if (contact) {
+        const c = await db.from('pin_contacts').insert({ pin_id: row.id, contact });
+        if (c.error) alert('Pin saved, but the contact could not be saved: ' + c.error.message);
+      }
       document.getElementById('title').value = '';
       document.getElementById('desc').value = '';
       document.getElementById('max').value = '';
+      contactEl.value = '';
       setPanel(false);
       document.getElementById('hint').textContent = 'Tap the map or search to choose a location.';
     };
