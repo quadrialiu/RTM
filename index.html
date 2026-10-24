@@ -35,9 +35,11 @@
       box-sizing:border-box; padding:18px; background:#fff; border:3px solid var(--ink); border-radius:28px;
       box-shadow:6px 6px 0 var(--ink); max-height:80vh; overflow-y:auto; }
     #panel { display:grid; gap:8px; }
-    #modal { position:fixed; inset:0; z-index:2000; background:rgba(31,19,0,.55); display:flex;
+    #panel.expanded { max-height:50vh; }
+    #panel:not(.expanded) #details { display:none; }
+    .modal { position:fixed; inset:0; z-index:2000; background:rgba(31,19,0,.55); display:flex;
       align-items:center; justify-content:center; }
-    #modal .card { position:static; display:grid; gap:8px; width:90%; max-width:360px; margin:0; }
+    .modal .card { position:static; display:grid; gap:8px; width:90%; max-width:360px; margin:0; }
     #searchRow { display:flex; gap:6px; }
     #searchRow button { width:auto; }
     #hint, .note, .fields label { font-size:13px; color:var(--muted); margin:0; font-weight:700; }
@@ -66,6 +68,20 @@
       border-radius:50%; background:#fff; }
     .dot.event, .teardrop.event { background:var(--violet); }
     .dot.quest, .teardrop.quest { background:var(--orange); }
+    #panelHead { display:flex; align-items:center; gap:8px; }
+    #panelHead button { min-height:36px; padding:0 12px; font-size:13px; }
+    #grab { flex:1; height:36px; display:flex; align-items:center; justify-content:center; touch-action:none; cursor:grab; }
+    #grab::before { content:''; width:44px; height:5px; border-radius:3px; background:var(--ink); opacity:.35; }
+    #results { max-height:140px; }
+    .bar { display:flex; align-items:center; gap:8px; padding:12px 14px; border-radius:999px; }
+    .bar span { flex:1; font-weight:800; font-size:15px; }
+    .bar button { min-height:40px; padding:0 14px; font-size:14px; }
+    #helpBtn { position:fixed; right:16px; bottom:84px; z-index:1000; width:48px; height:48px; padding:0; font-size:22px;
+      background:#fff; color:var(--ink); box-shadow:4px 4px 0 var(--ink); }
+    .modal ul { margin:0; padding-left:18px; font-size:14px; line-height:1.45; }
+    .modal h3 { margin:0; font-size:20px; }
+    .modal p { margin:0; font-size:14px; line-height:1.45; }
+    .teardrop.temp { background:#9CA3AF; }
   </style>
 </head>
 <body>
@@ -86,7 +102,7 @@
 
   <button id="fab">+ Add pin</button>
 
-  <div id="modal" class="closed">
+  <div id="modal" class="modal closed">
     <div class="card">
       <h3 style="margin:0">Welcome to Live Pins</h3>
       <input id="em" type="email" placeholder="Email" autocomplete="email">
@@ -98,14 +114,50 @@
     </div>
   </div>
 
+  <div id="tempBar" class="card bar closed">
+    <span id="tempText">Add a pin here?</span>
+    <button id="tempAdd">Add pin</button>
+    <button id="tempX" class="secondary">×</button>
+  </div>
+
+  <button id="helpBtn" aria-label="How to use">?</button>
+
+  <div id="helpModal" class="modal closed">
+    <div class="card">
+      <h3>How Live Pins works</h3>
+      <ul>
+        <li><b>Browse:</b> dots on the map are events (purple) and side quests (orange). Tap one to see its details.</li>
+        <li><b>Join:</b> open a pin and tap <b>I'm in</b>. If the host added a contact, use it to get in touch.</li>
+        <li><b>Add a pin:</b> tap a spot on the map, then <b>Add pin</b>. Or tap <b>+ Add pin</b> and search an address.</li>
+        <li><b>Events</b> have a start and end time and are for formal occasions like paid parties, beach clean-ups, or blood drives. <b>Side quests</b> are casual plans, like trying a new restaurant, that disappear at a time you choose.</li>
+        <li>Pins disappear automatically when their time is up.</li>
+        <li>Suggestions or bugs? Message @skyy_notsky on Instagram.</li>
+      </ul>
+      <button id="helpOk">Got it</button>
+    </div>
+  </div>
+
+  <div id="discModal" class="modal closed">
+    <div class="card">
+      <h3>Before you go</h3>
+      <p>Live Pins only connects people. We don't check pins or the people behind them, and we're not responsible for meetups. Meet in public places, tell a friend where you're going, and don't share private details. Use your own judgment.</p>
+      <button id="discOk">OK</button>
+    </div>
+  </div>
+
   <div id="panel" class="card closed">
-    <button id="closePanel" class="secondary">Close</button>
+    <div id="panelHead">
+      <div id="grab"></div>
+      <button id="toggleSize" class="secondary">Expand</button>
+      <button id="closePanel" class="secondary">Close</button>
+    </div>
     <div id="searchRow">
       <input id="search" placeholder="Search an address or tap the map">
       <button id="searchBtn">Go</button>
     </div>
     <div id="results"></div>
     <p id="hint">Tap the map or search to choose a location.</p>
+    <div id="details" class="fields">
     <select id="type">
       <option value="event">Event</option>
       <option value="quest">Side Quest</option>
@@ -136,6 +188,7 @@
     <input id="contact" maxlength="100" placeholder="Contact, e.g. @name on Instagram (optional)">
     <p class="note">Only signed-in users can see your contact. Share only what you are comfortable with.</p>
     <button id="submit">Drop pin</button>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -175,25 +228,32 @@
     const emailEl = document.getElementById('em'), pwEl = document.getElementById('pw');
     document.getElementById('cancel').onclick = () => modal.classList.add('closed');
     document.getElementById('signin').onclick = async () => {
+      flagDisc(true);
       const { error } = await db.auth.signInWithPassword({ email: emailEl.value.trim(), password: pwEl.value });
-      if (error) alert(error.message);
+      if (error) { flagDisc(false); alert(error.message); }
     };
     document.getElementById('signup').onclick = async () => {
+      flagDisc(true);
       const { data, error } = await db.auth.signUp({
         email: emailEl.value.trim(), password: pwEl.value, options: { emailRedirectTo: redirectTo }
       });
-      if (error) { alert(error.message); return; }
-      if (!data.session) alert('Account created. Check your email to confirm it, then sign in.');
+      if (error) { flagDisc(false); alert(error.message); return; }
+      if (!data.session) { flagDisc(false); alert('Account created. Check your email to confirm it, then sign in.'); }
     };
-    document.getElementById('google').onclick = () =>
+    document.getElementById('google').onclick = () => {
+      flagDisc(true);
       db.auth.signInWithOAuth({ provider: 'google', options: { redirectTo } });
+    };
 
     db.auth.onAuthStateChange((event, session) => {
       user = session ? session.user : null;
       if (user) modal.classList.add('closed');
+      // Show the disclaimer only after a real sign-in, not when a saved session is restored
+      if (event === 'SIGNED_IN' && discFlagged()) { flagDisc(false); discModal.classList.remove('closed'); }
       contacts = {};
       renderAuth();
       for (const id in markers) refreshPopup(id);
+      if (tempLatLng) placeTemp(tempLatLng);
     });
 
     // ---- 3. Map ----
@@ -207,10 +267,11 @@
     let chosen = null, chosenMarker = null;
     function choose(latlng) {
       chosen = latlng;
+      liftChosen();
       if (chosenMarker) chosenMarker.remove();
       chosenMarker = L.marker(latlng, { icon: dotIcon(typeEl.value, true) }).addTo(map);
       document.getElementById('hint').textContent =
-        'Location chosen: ' + latlng.lat.toFixed(4) + ', ' + latlng.lng.toFixed(4);
+        panel.classList.contains('expanded') ? 'Location chosen. Tap the map to move it.' : 'Location chosen. Tap Expand to add the details.';
     }
     const panel = document.getElementById('panel');
     const fab = document.getElementById('fab');
@@ -254,6 +315,7 @@
 
     function setPanel(open) {
       panel.classList.toggle('closed', !open);
+      setExpanded(false);
       if (open) setDefaults();
       if (open) closeSheet();
       updateFab();
@@ -261,7 +323,78 @@
     }
     fab.onclick = () => { if (user) setPanel(true); else modal.classList.remove('closed'); };
     document.getElementById('closePanel').onclick = () => setPanel(false);
-    map.on('click', (e) => { if (!panel.classList.contains('closed')) choose(e.latlng); else closeSheet(); });
+
+    // ---- Tap the map: with the add-pin sheet open it sets the location; otherwise it drops a temporary pin ----
+    map.on('click', (e) => {
+      if (!panel.classList.contains('closed')) { choose(e.latlng); return; }
+      if (!sheet.classList.contains('closed')) { closeSheet(); return; }
+      placeTemp(e.latlng);
+    });
+
+    // ---- Temporary pin ----
+    const tempBar = document.getElementById('tempBar');
+    let tempMarker = null, tempLatLng = null;
+    function placeTemp(latlng) {
+      tempLatLng = latlng;
+      if (tempMarker) tempMarker.remove();
+      tempMarker = L.marker(latlng, { icon: dotIcon('temp', true) }).addTo(map);
+      document.getElementById('tempText').textContent = user ? 'Add a pin here?' : 'Sign in to add a pin here';
+      document.getElementById('tempAdd').textContent = user ? 'Add pin' : 'Sign in';
+      tempBar.classList.remove('closed');
+      updateFab();
+    }
+    function clearTemp() {
+      if (tempMarker) tempMarker.remove();
+      tempMarker = null; tempLatLng = null;
+      tempBar.classList.add('closed');
+      updateFab();
+    }
+    document.getElementById('tempX').onclick = clearTemp;
+    document.getElementById('tempAdd').onclick = () => {
+      if (!user) { modal.classList.remove('closed'); return; }
+      const ll = tempLatLng;
+      clearTemp();
+      setPanel(true);
+      choose(ll);
+      setExpanded(true);
+    };
+
+    // ---- Resizable add-pin sheet ----
+    const toggleSize = document.getElementById('toggleSize');
+    function liftChosen() { // keep the chosen spot visible above the sheet
+      if (!chosen) return;
+      const y = map.latLngToContainerPoint(chosen).y, target = window.innerHeight * 0.2;
+      if (y > target) map.panBy([0, y - target]);
+    }
+    function setExpanded(on) {
+      panel.classList.toggle('expanded', on);
+      toggleSize.textContent = on ? 'Minimize' : 'Expand';
+      if (on) liftChosen();
+    }
+    toggleSize.onclick = () => setExpanded(!panel.classList.contains('expanded'));
+    // Drag the handle: up expands, down minimizes, a tap toggles
+    let dragY = null;
+    const grab = document.getElementById('grab');
+    grab.addEventListener('pointerdown', (e) => { dragY = e.clientY; });
+    grab.addEventListener('pointerup', (e) => {
+      if (dragY === null) return;
+      const dy = e.clientY - dragY; dragY = null;
+      if (dy < -30) setExpanded(true); else if (dy > 30) setExpanded(false); else toggleSize.click();
+    });
+
+    // ---- How-to and sign-in disclaimer ----
+    const helpBtn = document.getElementById('helpBtn');
+    const helpModal = document.getElementById('helpModal');
+    const discModal = document.getElementById('discModal');
+    helpBtn.onclick = () => helpModal.classList.remove('closed');
+    document.getElementById('helpOk').onclick = () => helpModal.classList.add('closed');
+    document.getElementById('discOk').onclick = () => discModal.classList.add('closed');
+    function flagDisc(on) {
+      try { if (on) sessionStorage.setItem('showDisc', '1'); else sessionStorage.removeItem('showDisc'); } catch (e) {}
+    }
+    function discFlagged() {
+      try { return sessionStorage.getItem('showDisc') === '1'; } catch (e) { return false; }
+    }
 
     // ---- Search with suggestions (Photon, built on OpenStreetMap) ----
     const searchEl = document.getElementById('search');
@@ -293,7 +426,7 @@
       searchEl.value = labelFor(f.properties);
       resultsEl.replaceChildren();
       lastResults = [];
-      map.setView(latlng, 16);
+      map.setView(latlng, 16, { animate: false });
       choose(latlng);
     }
 
@@ -394,13 +527,16 @@
     let selectedId = null, filter = 'all';
 
     function updateFab() {
-      fab.style.display = (panel.classList.contains('closed') && sheet.classList.contains('closed')) ? 'block' : 'none';
+      const idle = panel.classList.contains('closed') && sheet.classList.contains('closed') && tempBar.classList.contains('closed');
+      fab.style.display = idle ? 'block' : 'none';
+      helpBtn.style.display = idle ? 'block' : 'none';
     }
     function renderSheet() { sheetBody.replaceChildren(buildPopup(pins[selectedId])); }
     function refreshPopup(id) { if (id === selectedId && pins[id]) renderSheet(); }
 
     function selectPin(id) {
       if (!panel.classList.contains('closed')) return; // busy adding a pin
+      clearTemp();
       if (selectedId && markers[selectedId]) markers[selectedId].marker.setIcon(dotIcon(pins[selectedId].type, false));
       selectedId = id;
       markers[id].marker.setIcon(dotIcon(pins[id].type, true));
