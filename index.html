@@ -265,8 +265,12 @@
 
     // ---- 4. Choosing a location (tap or search) ----
     let chosen = null, chosenMarker = null;
-    function choose(latlng) {
+    function choose(latlng, label) {
       chosen = latlng;
+      searchEl.value = label || (latlng.lat.toFixed(5) + ', ' + latlng.lng.toFixed(5));
+      resultsEl.replaceChildren();
+      lastResults = [];
+      if (!label) lookupAddress(latlng);
       liftChosen();
       if (chosenMarker) chosenMarker.remove();
       chosenMarker = L.marker(latlng, { icon: dotIcon(typeEl.value, true) }).addTo(map);
@@ -315,6 +319,10 @@
 
     function setPanel(open) {
       panel.classList.toggle('closed', !open);
+      document.getElementById('hint').textContent = 'Tap the map or search to choose a location.';
+      searchEl.value = '';
+      resultsEl.replaceChildren();
+      lastResults = [];
       setExpanded(false);
       if (open) setDefaults();
       if (open) closeSheet();
@@ -399,12 +407,26 @@
     // ---- Search with suggestions (Photon, built on OpenStreetMap) ----
     const searchEl = document.getElementById('search');
     const resultsEl = document.getElementById('results');
-    let searchTimer, searchSeq = 0, lastResults = [];
+    let searchTimer, searchSeq = 0, reverseSeq = 0, lastResults = [];
 
     // Turn a result into readable text, e.g. "Caudan Waterfront, Port Louis"
     function labelFor(p) {
       const parts = [p.name, p.street, p.district, p.city].filter(Boolean);
       return [...new Set(parts)].join(', ');
+    }
+
+    // Replace the coordinates with the nearest address, if Photon finds one close by
+    async function lookupAddress(latlng) {
+      const seq = ++reverseSeq;
+      try {
+        const res = await fetch('https://photon.komoot.io/reverse?limit=1&lon=' + latlng.lng + '&lat=' + latlng.lat);
+        const data = await res.json();
+        const f = data.features && data.features[0];
+        if (!f || seq !== reverseSeq || chosen !== latlng) return; // stale, or nothing found
+        const near = latlng.distanceTo(L.latLng(f.geometry.coordinates[1], f.geometry.coordinates[0]));
+        const text = labelFor(f.properties);
+        if (text && near < 500) searchEl.value = text;
+      } catch (err) { /* keep the coordinates */ }
     }
 
     function showResults(features) {
@@ -427,7 +449,7 @@
       resultsEl.replaceChildren();
       lastResults = [];
       map.setView(latlng, 16, { animate: false });
-      choose(latlng);
+      choose(latlng, labelFor(f.properties));
     }
 
     async function searchPlaces(q) {
